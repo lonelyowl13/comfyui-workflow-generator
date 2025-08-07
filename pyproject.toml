@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfyui-workflow-generator"
+version = "0.1.0"
+description = "A Python package for generating ComfyUI workflow APIs from object_info.json using AST code generator"
+readme = "README.md"
+license = {text = "WTFPL"}
+authors = [
+    {name = "Owl", email = "lonelyowl13@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.25.0",
+    "astor>=0.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black>=21.0",
+    "flake8>=3.8",
+    "mypy>=0.900",
+]
+
+[project.scripts]
+comfyui-generate = "comfyui_workflow_generator.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lonelyowl13/comfyui-workflow-generator"
+Repository = "https://github.com/lonelyowl13/comfyui-workflow-generator"
+Issues = "https://github.com/lonelyowl13/comfyui-workflow-generator/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true 
