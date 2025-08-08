@@ -29,6 +29,7 @@ class WorkflowGenerator:
             "INT": "int",
             "FLOAT": "float", 
             "STRING": "str",
+            "BOOLEAN": "bool",
         }
     
     def normalize_node_name(self, node_name: str) -> str:
@@ -101,6 +102,8 @@ class WorkflowGenerator:
                 return ast.Name(id="StrNodeOutput", ctx=ast.Load())
             elif output_type == "float":
                 return ast.Name(id="FloatNodeOutput", ctx=ast.Load())
+            elif output_type == "bool":
+                return ast.Name(id="BoolNodeOutput", ctx=ast.Load())
             elif output_type == "AnyNodeOutput":
                 return ast.Name(id="AnyNodeOutput", ctx=ast.Load())
             else:
@@ -116,6 +119,8 @@ class WorkflowGenerator:
                     types.append(ast.Name(id="StrNodeOutput", ctx=ast.Load()))
                 elif output_type == "float":
                     types.append(ast.Name(id="FloatNodeOutput", ctx=ast.Load()))
+                elif output_type == "bool":
+                    types.append(ast.Name(id="BoolNodeOutput", ctx=ast.Load()))
                 elif output_type == "AnyNodeOutput":
                     types.append(ast.Name(id="AnyNodeOutput", ctx=ast.Load()))
                 else:
@@ -136,13 +141,13 @@ class WorkflowGenerator:
                     for input_info in input_section[input_type].values():
                         comfy_input_type = input_info[0]
                         normalized_type = self.get_normalized_type(comfy_input_type)
-                        if normalized_type not in ["int", "float", "str"]:
+                        if normalized_type not in ["int", "float", "str", "bool"]:
                             custom_types.add(normalized_type)
             
             # Output types
             for output in node_info["output"]:
                 normalized_output_type = self.get_normalized_type(output)
-                if normalized_output_type not in ["int", "float", "str"]:
+                if normalized_output_type not in ["int", "float", "str", "bool"]:
                     custom_types.add(normalized_output_type)
         
         # Generate class definitions
@@ -290,6 +295,8 @@ class WorkflowGenerator:
                 actual_output_type = "StrNodeOutput"
             elif normalized_output_type == "float":
                 actual_output_type = "FloatNodeOutput"
+            elif normalized_output_type == "bool":
+                actual_output_type = "BoolNodeOutput"
             else:
                 actual_output_type = normalized_output_type
             
@@ -558,6 +565,14 @@ class WorkflowGenerator:
             decorator_list=[]
         )
         
+        bool_output = ast.ClassDef(
+            name="BoolNodeOutput",
+            bases=[ast.Name(id="NodeOutput", ctx=ast.Load())],
+            keywords=[],
+            body=[ast.Pass()],
+            decorator_list=[]
+        )
+        
         any_output = ast.ClassDef(
             name="AnyNodeOutput",
             bases=[ast.Name(id="NodeOutput", ctx=ast.Load())],
@@ -566,7 +581,7 @@ class WorkflowGenerator:
             decorator_list=[]
         )
         
-        return [node_output, str_output, float_output, int_output, any_output]
+        return [node_output, str_output, float_output, int_output, bool_output, any_output]
     
     def generate_utility_functions(self) -> List[ast.FunctionDef]:
         """Generate utility functions."""
