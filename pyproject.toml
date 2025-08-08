@@ -7,14 +7,14 @@ name = "comfyui-workflow-generator"
 version = "0.1.0"
 description = "A Python package for generating ComfyUI workflow APIs from object_info.json using AST code generator"
 readme = "README.md"
-license = {text = "WTFPL"}
+license = "WTFPL"
 authors = [
     {name = "Owl", email = "lonelyowl13@gmail.com"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
+
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
