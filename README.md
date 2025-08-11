@@ -146,3 +146,29 @@ black comfyui_workflow_generator/
 # Lint code
 flake8 comfyui_workflow_generator/
 ```
+
+## Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test categories
+python run_tests.py --unit        # Unit tests only
+python run_tests.py --cli         # CLI tests only  
+python run_tests.py --executor    # Executor tests only
+python run_tests.py --integration # Integration tests only
+
+# Run with coverage
+python -m pytest tests/ --cov=comfyui_workflow_generator --cov-report=html
+```
+
+### Test Categories
+
+- **Unit Tests** (`tests/test_generator.py`): Test individual components like workflow generation, type normalization, and AST manipulation
+- **CLI Tests** (`tests/test_cli.py`): Test command-line interface functionality and error handling
+- **Executor Tests** (`tests/test_executor.py`): Test workflow execution, file uploads, and server communication
+- **Integration Tests** (`tests/test_integration.py`): Test complete workflows from generation to execution
+

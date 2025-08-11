@@ -4,12 +4,10 @@ ComfyUI Workflow Executor
 Handles execution of arbitrary ComfyUI workflows and result retrieval.
 """
 
-import json
 import os
 import time
 import requests
-from typing import Dict, Any, Optional, List, Union
-from pathlib import Path
+from typing import Dict, Any, Optional, List
 
 
 class ComfyUIWorkflowExecutor:

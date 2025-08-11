@@ -22,7 +22,7 @@ Examples:
   comfyui-generate object_info.json -o my_api.py
   
   # Generate from ComfyUI server
-  comfyui-generate http://127.0.0.1:8188 -o workflow_api.py
+  comfyui-generate http://127.0.0.1:8188/object_info -o workflow_api.py
   
   # Generate with default output name
   comfyui-generate object_info.json
@@ -31,7 +31,7 @@ Examples:
     
     parser.add_argument(
         "source",
-        help="Source of object_info: file path or URL (e.g., object_info.json or http://127.0.0.1:8188)"
+        help="Source of object_info: file path or URL (e.g., object_info.json or http://127.0.0.1:8188/object_info)"
     )
     
     parser.add_argument(

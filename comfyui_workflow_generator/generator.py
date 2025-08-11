@@ -55,7 +55,11 @@ class WorkflowGenerator:
         
         # Remove leading/trailing underscores
         normalized = normalized.strip('_')
-        
+
+        # if normalized name starts with a number, underscore is required
+        if normalized and normalized[0].isdigit():
+            normalized = '_' + normalized
+
         # Ensure it's not empty
         if not normalized:
             normalized = 'Node'
@@ -696,14 +700,14 @@ class WorkflowGenerator:
         
         return ast.Module(body=body, type_ignores=[])
     
-    def generate_code(self) -> str:
+    def genetate_module_code(self) -> str:
         """Generate Python code as a string."""
         module = self.generate_module()
         return astor.to_source(module)
     
     def save_to_file(self, output_path: str) -> None:
         """Generate code and save to file."""
-        code = self.generate_code()
+        code = self.genetate_module_code()
         
         with open(output_path, 'w') as f:
             f.write(code)
@@ -719,6 +723,6 @@ class WorkflowGenerator:
     def from_url(cls, url: str) -> 'WorkflowGenerator':
         """Create generator from ComfyUI server URL."""
         import requests
-        response = requests.get(f"{url}/object_info")
+        response = requests.get(url)
         response.raise_for_status()
         return cls(response.json()) 
