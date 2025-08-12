@@ -6,6 +6,9 @@ Generates Python code from ComfyUI object_info.json using AST manipulation.
 
 import json
 import ast
+from textwrap import indent
+import textwrap
+import uuid
 import astor
 import re
 from typing import Dict, Any, List
@@ -41,27 +44,37 @@ class WorkflowGenerator:
         Returns:
             Valid Python identifier
         """
-        # Replace invalid characters with underscores
-        # Keep alphanumeric and underscores, replace everything else with underscore
-        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
-        
-        # Remove leading digits (Python identifiers can't start with digits)
-        if normalized and normalized[0].isdigit():
-            normalized = '_' + normalized
-        
-        # Remove consecutive underscores
-        normalized = re.sub(r'_+', '_', normalized)
-        
-        # Remove leading/trailing underscores
-        normalized = normalized.strip('_')
 
-        # if normalized name starts with a number, underscore is required
-        if normalized and normalized[0].isdigit():
-            normalized = '_' + normalized
+        # if name is not a valid identifier, return random gibberish
+        # this is a fallback variant and should not occur normaly, but that's comfyui so everything is possible
+        invalid_identifier = "invalid_identifier_" + str(uuid.uuid4())
 
-        # Ensure it's not empty
-        if not normalized:
-            normalized = 'Node'
+        # name is empty or none
+        if not name:
+            return invalid_identifier
+        
+        # Check if the name is already a valid Python identifier
+        if name.isidentifier():
+                normalized = name
+        else:
+            # If not a valid identifier, we need to fix it
+            # Replace invalid characters with underscores
+            # Keep letters, digits, and underscores
+            normalized = re.sub(r'[^\w]', '_', name)
+            
+            # Remove leading digits (Python identifiers can't start with digits)
+            if normalized and normalized[0].isdigit():
+                normalized = '_' + normalized
+            
+            # Remove consecutive underscores
+            normalized = re.sub(r'_+', '_', normalized)
+            
+            # Remove leading/trailing underscores
+            normalized = normalized.strip('_')
+            
+            # If we ended up with nothing valid, use a fallback
+            if not normalized:
+                normalized = invalid_identifier
         
         # Ensure it's not a Python keyword
         python_keywords = {
@@ -77,7 +90,7 @@ class WorkflowGenerator:
         
         return normalized
     
-    def get_normalized_type(self, comfy_type: Any, node_name: str = None, input_name: str = None) -> str:
+    def get_normalized_type(self, comfy_type: Any) -> str:
         """Convert ComfyUI type to Python type."""
         if isinstance(comfy_type, list):
             # Determine if it's a string enum or int enum for primitive type
@@ -141,12 +154,10 @@ class WorkflowGenerator:
             return ast.Tuple(elts=types, ctx=ast.Load())
     
     def generate_custom_types(self) -> List[ast.ClassDef]:
-        """Generate custom type classes and enums."""
+        """Generate custom type classes."""
         custom_types = set()
-        enums = []
-        enum_mapping = {}  # Track which enum to use for which input
         
-        # Collect all custom types and string enums from nodes
+        # Collect all custom types from nodes
         for node_name, node_info in self.object_info.items():
             # Input types - handle both required and optional inputs
             input_section = node_info.get("input", {})
@@ -155,70 +166,16 @@ class WorkflowGenerator:
                     for input_name, input_info in input_section[input_type].items():
                         comfy_input_type = input_info[0]
                         
-                        if isinstance(comfy_input_type, list):
-                            # This is an enum - create a custom enum
-                            enum_name = f"{self.normalize_name(node_name)}{self.normalize_name(input_name)}Values"
-                            
-                            # Determine if it's a string enum or int enum
-                            is_string_enum = all(isinstance(v, str) for v in comfy_input_type)
-                            is_int_enum = all(isinstance(v, int) for v in comfy_input_type)
-                            
-                            if is_string_enum:
-                                enum_base = "StrEnum"
-                            elif is_int_enum:
-                                enum_base = "IntEnum"
-                            else:
-                                # Mixed types or other types - skip enum generation
-                                continue
-                            
-                            # Create enum class
-                            enum_body = []
-                            for value in comfy_input_type:
-                                # Create a valid Python identifier for the enum member
-                                if is_string_enum:
-                                    member_name = self.normalize_name(value)
-                                    if member_name[0].isdigit():
-                                        member_name = f"_{member_name}"
-                                else:  # int enum
-                                    member_name = f"value_{value}"
-                                
-                                # Add enum member
-                                enum_body.append(
-                                    ast.Assign(
-                                        targets=[ast.Name(id=member_name, ctx=ast.Store())],
-                                        value=ast.Constant(value=value),
-                                        lineno=0
-                                    )
-                                )
-                            
-                            # If enum is empty, add pass statement
-                            if not enum_body:
-                                enum_body.append(ast.Pass())
-                            
-                            enum_class = ast.ClassDef(
-                                name=enum_name,
-                                bases=[ast.Name(id=enum_base, ctx=ast.Load())],
-                                keywords=[],
-                                body=enum_body,
-                                decorator_list=[]
-                            )
-                            
-                            enums.append(enum_class)
-                            enum_mapping[(node_name, input_name)] = enum_name
-                        else:
-                            # Regular type
-                            normalized_type = self.get_normalized_type(comfy_input_type)
-                            if normalized_type not in ["int", "float", "str", "bool"]:
-                                custom_types.add(normalized_type)
+                        # Regular type
+                        normalized_type = self.get_normalized_type(comfy_input_type)
+                        if normalized_type not in ["int", "float", "str", "bool"]:
+                            custom_types.add(normalized_type)
             
             # Output types
             for output in node_info["output"]:
                 normalized_output_type = self.get_normalized_type(output)
                 if normalized_output_type not in ["int", "float", "str", "bool"]:
                     custom_types.add(normalized_output_type)
-        
-        # Store the mapping for use in method generation
-        self.enum_mapping = enum_mapping
         
         # Generate class definitions for custom types
         classes = []
@@ -232,8 +189,7 @@ class WorkflowGenerator:
             )
             classes.append(class_def)
         
-        # Return both custom types and enums
-        return classes + enums
+        return classes
     
     def generate_node_method(self, node_name: str, node_info: Dict[str, Any]) -> ast.FunctionDef:
         """Generate a method for a single node."""
@@ -286,7 +242,7 @@ class WorkflowGenerator:
         # Generate arguments
         for input_name, input_info in all_inputs.items():
             comfy_input_type = input_info[0]
-            normalized_type = self.get_normalized_type(comfy_input_type, node_name, input_name)
+            normalized_type = self.get_normalized_type(comfy_input_type)
             
             # Clean argument name
             clean_arg_name = self.normalize_name(input_name)
@@ -392,6 +348,52 @@ class WorkflowGenerator:
                     )
                 )
             body.append(return_stmt)
+        
+        # Generate docstring
+        docstring_lines = []
+        
+        # Add display_name, description, category if available
+        if "display_name" in node_info:
+            docstring_lines.append(f"Display Name: {node_info['display_name']}")
+        if "description" in node_info:
+            docstring_lines.append(f"Description: {textwrap.fill(node_info['description'], width=72)}")
+        if "category" in node_info:
+            docstring_lines.append(f"Category: {node_info['category']}")
+        
+        # Add allowed values for enum inputs
+        enum_inputs = []
+        for input_name, input_info in all_inputs.items():
+            comfy_input_type = input_info[0]
+
+            # this is a list of allowed values, e.g. downloaded checkpoints, samplers, loras, etc 
+            # adding this to the docstring as a context 
+            if isinstance(comfy_input_type, list) and comfy_input_type:
+                options_string = f"{', \n'.join(map(str, comfy_input_type))}"
+
+                # indent for readability
+                options_string = indent(options_string, "    ")
+                enum_inputs.append(f"{input_name} = [\n{options_string}\n]")
+
+        if enum_inputs:
+            docstring_lines.append("")
+            docstring_lines.append("Options:\n")
+            for enum_input in enum_inputs:
+                docstring_lines.append(f"{enum_input}\n")
+
+        
+        if docstring_lines:
+            docstring = "\n"
+            
+            for i, line in enumerate(docstring_lines):
+                if line.strip():  # Non-empty line
+                    docstring += line + "\n"
+                elif i > 0 and docstring_lines[i-1].strip():  # Empty line after content
+                    docstring += "\n"
+
+            docstring = indent(docstring, "        ") + "        "
+
+            # Create the docstring AST node
+            body.insert(0, ast.Expr(value=ast.Constant(value=docstring)))
         
         # Get return type annotation
         return_type = self.get_return_type(node_info["output"])
@@ -754,14 +756,7 @@ class WorkflowGenerator:
                 names=[ast.alias(name="dumps", asname=None)],
                 level=0
             ),
-            ast.ImportFrom(
-                module="enum",
-                names=[
-                    ast.alias(name="StrEnum", asname=None),
-                    ast.alias(name="IntEnum", asname=None)
-                ],
-                level=0
-            )
+
         ]
         
         # Generate all components
