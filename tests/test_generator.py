@@ -79,22 +79,22 @@ class TestWorkflowGenerator:
         assert "BOOLEAN" in generator.primitives
         assert generator.primitives["BOOLEAN"] == "bool"
     
-    def test_normalize_node_name(self, sample_object_info):
-        """Test node name normalization."""
+    def test_normalize_name(self, sample_object_info):
+        """Test name normalization."""
         generator = WorkflowGenerator(sample_object_info)
         
         # Test basic normalization
-        assert generator.normalize_node_name("CheckpointLoaderSimple") == "CheckpointLoaderSimple"
-        assert generator.normalize_node_name("CLIP Text Encode") == "CLIP_Text_Encode"
-        assert generator.normalize_node_name("KSampler Advanced") == "KSampler_Advanced"
+        assert generator.normalize_name("CheckpointLoaderSimple") == "CheckpointLoaderSimple"
+        assert generator.normalize_name("CLIP Text Encode") == "CLIP_Text_Encode"
+        assert generator.normalize_name("KSampler Advanced") == "KSampler_Advanced"
         
         # Test special characters
-        assert generator.normalize_node_name("Node@#$%😭😭😭") == "Node"
-        assert generator.normalize_node_name("123Node") == "_123Node"
-    
+        assert generator.normalize_name("Node@#$%😭😭😭") == "Node"
+        assert generator.normalize_name("123Node") == "_123Node"
+        
         # Test Python keywords
-        assert generator.normalize_node_name("class") == "class_"
-        assert generator.normalize_node_name("def") == "def_"
+        assert generator.normalize_name("class") == "class_"
+        assert generator.normalize_name("def") == "def_"
     
     def test_get_normalized_type(self, sample_object_info):
         """Test type normalization."""
@@ -119,6 +119,10 @@ class TestWorkflowGenerator:
         
         # Test list (enum)
         assert generator.get_normalized_type(["a", "b", "c"]) == "str"
+        
+        # Test with node_name and input_name for enum mapping (should return primitive types)
+        assert generator.get_normalized_type(["a", "b", "c"], "TestNode", "test_input") == "str"
+        assert generator.get_normalized_type([1, 2, 3], "TestNode", "test_input") == "int"
 
     def test_get_return_type(self, sample_object_info):
         """Test return type generation."""
@@ -159,6 +163,60 @@ class TestWorkflowGenerator:
         assert "float" not in type_names
         assert "str" not in type_names
         assert "bool" not in type_names
+    
+    def test_int_enum_generation(self):
+        """Test integer enum generation."""
+        object_info = {
+            'TestNode': {
+                'input': {
+                    'required': {
+                        'duration': [[5, 8, 10], 'COMBO']
+                    }
+                },
+                'output': ['LATENT']
+            }
+        }
+        generator = WorkflowGenerator(object_info)
+        custom_types = generator.generate_custom_types()
+        
+        # Should generate an IntEnum
+        enum_names = [cls.name for cls in custom_types if hasattr(cls, 'name')]
+        assert "TestNodedurationValues" in enum_names
+        
+        # Check that it's an IntEnum
+        for cls in custom_types:
+            if cls.name == "TestNodedurationValues":
+                assert "IntEnum" in [base.id for base in cls.bases]
+                break
+    
+    def test_empty_enum_generation(self):
+        """Test empty enum generation."""
+        object_info = {
+            'TestNode': {
+                'input': {
+                    'required': {
+                        'empty_enum': [[], 'COMBO']  # Empty enum
+                    }
+                },
+                'output': ['LATENT']
+            }
+        }
+        generator = WorkflowGenerator(object_info)
+        custom_types = generator.generate_custom_types()
+        
+        # Should generate an enum even if empty
+        enum_names = [cls.name for cls in custom_types if hasattr(cls, 'name')]
+        assert "TestNodeempty_enumValues" in enum_names
+        
+        # Check that it has a pass statement
+        for cls in custom_types:
+            if cls.name == "TestNodeempty_enumValues":
+                # Should have at least one body element (the pass statement)
+                assert len(cls.body) > 0
+                # Check if it has a pass statement
+                has_pass = any(isinstance(stmt, ast.Pass) for stmt in cls.body)
+                assert has_pass, "Empty enum should have a pass statement"
+                break
     
     def test_generate_base_classes(self, sample_object_info):
         """Test base class generation."""

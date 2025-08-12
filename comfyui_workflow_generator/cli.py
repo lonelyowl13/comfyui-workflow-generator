@@ -7,6 +7,7 @@ import argparse
 import sys
 import json
 import requests
+import traceback
 from pathlib import Path
 from .generator import WorkflowGenerator
 
@@ -26,6 +27,9 @@ Examples:
   
   # Generate with default output name
   comfyui-generate object_info.json
+  
+  # Generate with verbose error output
+  comfyui-generate object_info.json --verbose
         """
     )
     
@@ -38,6 +42,12 @@ Examples:
         "-o", "--output",
         default="workflow_api.py",
         help="Output file path (default: workflow_api.py)"
+    )
+    
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output with full exception traceback"
     )
     
     args = parser.parse_args()
@@ -66,27 +76,45 @@ Examples:
         
     except FileNotFoundError as e:
         print(f"❌ Error: File not found - {e}")
+        if args.verbose:
+            print("\n🔍 Full traceback:")
+            traceback.print_exc()
         sys.exit(1)
     except ConnectionError as e:
         print(f"❌ Error: Could not connect to server - {e}")
         print(f"💡 Tip: Make sure the ComfyUI server is running and accessible")
+        if args.verbose:
+            print("\n🔍 Full traceback:")
+            traceback.print_exc()
         sys.exit(1)
     except requests.exceptions.RequestException as e:
         print(f"❌ Error: Network request failed - {e}")
         print(f"💡 Tip: Check your internet connection and server URL")
+        if args.verbose:
+            print("\n🔍 Full traceback:")
+            traceback.print_exc()
         sys.exit(1)
     except json.JSONDecodeError as e:
         print(f"❌ Error: Invalid JSON in object_info - {e}")
         print(f"💡 Tip: Make sure the file contains valid JSON")
+        if args.verbose:
+            print("\n🔍 Full traceback:")
+            traceback.print_exc()
         sys.exit(1)
     except KeyError as e:
         print(f"❌ Error: Invalid object_info format - missing key: {e}")
         print(f"💡 Tip: Make sure the file contains valid ComfyUI object_info")
         print(f"   Expected format: {{'NodeName': {{'input': {{'required': {{...}}}}}}}}")
+        if args.verbose:
+            print("\n🔍 Full traceback:")
+            traceback.print_exc()
         sys.exit(1)
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         print(f"💡 Tip: Check that the source contains valid ComfyUI object_info")
+        if args.verbose:
+            print("\n🔍 Full traceback:")
+            traceback.print_exc()
         sys.exit(1)
 
 

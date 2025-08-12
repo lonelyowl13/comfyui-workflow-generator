@@ -8,8 +8,7 @@ import json
 import ast
 import astor
 import re
-from typing import Dict, Any, Set, List, Union
-from pathlib import Path
+from typing import Dict, Any, List
 
 
 class WorkflowGenerator:
@@ -32,19 +31,19 @@ class WorkflowGenerator:
             "BOOLEAN": "bool",
         }
     
-    def normalize_node_name(self, node_name: str) -> str:
+    def normalize_name(self, name: str) -> str:
         """
-        Convert a node name to a valid Python identifier.
+        Convert a name to a valid Python identifier.
         
         Args:
-            node_name: Original node name from object_info
+            name: Original name from object_info
             
         Returns:
             Valid Python identifier
         """
         # Replace invalid characters with underscores
         # Keep alphanumeric and underscores, replace everything else with underscore
-        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', node_name)
+        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
         
         # Remove leading digits (Python identifiers can't start with digits)
         if normalized and normalized[0].isdigit():
@@ -78,10 +77,19 @@ class WorkflowGenerator:
         
         return normalized
     
-    def get_normalized_type(self, comfy_type: Any) -> str:
+    def get_normalized_type(self, comfy_type: Any, node_name: str = None, input_name: str = None) -> str:
         """Convert ComfyUI type to Python type."""
         if isinstance(comfy_type, list):
-            return "str"  # String enum
+            # Determine if it's a string enum or int enum for primitive type
+            is_string_enum = all(isinstance(v, str) for v in comfy_type)
+            is_int_enum = all(isinstance(v, int) for v in comfy_type)
+            
+            if is_string_enum:
+                return "str"
+            elif is_int_enum:
+                return "int"
+            else:
+                return "str"  # Fallback to str
         
         # Handle the * type (generic/any type)
         if comfy_type == "*":
@@ -90,7 +98,7 @@ class WorkflowGenerator:
         type_ = self.primitives.get(comfy_type)
         if not type_:
             # Custom ComfyUI type - normalize it like a node name
-            return self.normalize_node_name(comfy_type)
+            return self.normalize_name(comfy_type)
         return type_
     
     def get_return_type(self, outputs: List[str]) -> ast.expr:
@@ -133,20 +141,75 @@ class WorkflowGenerator:
             return ast.Tuple(elts=types, ctx=ast.Load())
     
     def generate_custom_types(self) -> List[ast.ClassDef]:
-        """Generate custom type classes."""
+        """Generate custom type classes and enums."""
         custom_types = set()
+        enums = []
+        enum_mapping = {}  # Track which enum to use for which input
         
-        # Collect all custom types from nodes
-        for node_info in self.object_info.values():
+        # Collect all custom types and string enums from nodes
+        for node_name, node_info in self.object_info.items():
             # Input types - handle both required and optional inputs
             input_section = node_info.get("input", {})
             for input_type in ["required", "optional"]:
                 if input_type in input_section:
-                    for input_info in input_section[input_type].values():
+                    for input_name, input_info in input_section[input_type].items():
                         comfy_input_type = input_info[0]
-                        normalized_type = self.get_normalized_type(comfy_input_type)
-                        if normalized_type not in ["int", "float", "str", "bool"]:
-                            custom_types.add(normalized_type)
+                        
+                        if isinstance(comfy_input_type, list):
+                            # This is an enum - create a custom enum
+                            enum_name = f"{self.normalize_name(node_name)}{self.normalize_name(input_name)}Values"
+                            
+                            # Determine if it's a string enum or int enum
+                            is_string_enum = all(isinstance(v, str) for v in comfy_input_type)
+                            is_int_enum = all(isinstance(v, int) for v in comfy_input_type)
+                            
+                            if is_string_enum:
+                                enum_base = "StrEnum"
+                            elif is_int_enum:
+                                enum_base = "IntEnum"
+                            else:
+                                # Mixed types or other types - skip enum generation
+                                continue
+                            
+                            # Create enum class
+                            enum_body = []
+                            for value in comfy_input_type:
+                                # Create a valid Python identifier for the enum member
+                                if is_string_enum:
+                                    member_name = self.normalize_name(value)
+                                    if member_name[0].isdigit():
+                                        member_name = f"_{member_name}"
+                                else:  # int enum
+                                    member_name = f"value_{value}"
+                                
+                                # Add enum member
+                                enum_body.append(
+                                    ast.Assign(
+                                        targets=[ast.Name(id=member_name, ctx=ast.Store())],
+                                        value=ast.Constant(value=value),
+                                        lineno=0
+                                    )
+                                )
+                            
+                            # If enum is empty, add pass statement
+                            if not enum_body:
+                                enum_body.append(ast.Pass())
+                            
+                            enum_class = ast.ClassDef(
+                                name=enum_name,
+                                bases=[ast.Name(id=enum_base, ctx=ast.Load())],
+                                keywords=[],
+                                body=enum_body,
+                                decorator_list=[]
+                            )
+                            
+                            enums.append(enum_class)
+                            enum_mapping[(node_name, input_name)] = enum_name
+                        else:
+                            # Regular type
+                            normalized_type = self.get_normalized_type(comfy_input_type)
+                            if normalized_type not in ["int", "float", "str", "bool"]:
+                                custom_types.add(normalized_type)
             
             # Output types
             for output in node_info["output"]:
@@ -154,7 +217,10 @@ class WorkflowGenerator:
                 if normalized_output_type not in ["int", "float", "str", "bool"]:
                     custom_types.add(normalized_output_type)
         
-        # Generate class definitions
+        # Store the mapping for use in method generation
+        self.enum_mapping = enum_mapping
+        
+        # Generate class definitions for custom types
         classes = []
         for type_name in sorted(custom_types):
             class_def = ast.ClassDef(
@@ -166,12 +232,13 @@ class WorkflowGenerator:
             )
             classes.append(class_def)
         
-        return classes
+        # Return both custom types and enums
+        return classes + enums
     
     def generate_node_method(self, node_name: str, node_info: Dict[str, Any]) -> ast.FunctionDef:
         """Generate a method for a single node."""
         # Convert node name to valid Python method name
-        method_name = self.normalize_node_name(node_name)
+        method_name = self.normalize_name(node_name)
         
         # Get input section
         input_section = node_info.get("input", {})
@@ -219,10 +286,10 @@ class WorkflowGenerator:
         # Generate arguments
         for input_name, input_info in all_inputs.items():
             comfy_input_type = input_info[0]
-            normalized_type = self.get_normalized_type(comfy_input_type)
+            normalized_type = self.get_normalized_type(comfy_input_type, node_name, input_name)
             
             # Clean argument name
-            clean_arg_name = self.normalize_node_name(input_name)
+            clean_arg_name = self.normalize_name(input_name)
             arg_names.append(clean_arg_name)
             
             # Create argument
@@ -260,7 +327,7 @@ class WorkflowGenerator:
                         values=[
                             ast.Call(
                                 func=ast.Name(id="to_comfy_input", ctx=ast.Load()),
-                                args=[ast.Name(id=self.normalize_node_name(name), ctx=ast.Load())],
+                                args=[ast.Name(id=self.normalize_name(name), ctx=ast.Load())],
                                 keywords=[]
                             ) for name in all_inputs.keys()
                         ]
@@ -685,6 +752,14 @@ class WorkflowGenerator:
             ast.ImportFrom(
                 module="json",
                 names=[ast.alias(name="dumps", asname=None)],
+                level=0
+            ),
+            ast.ImportFrom(
+                module="enum",
+                names=[
+                    ast.alias(name="StrEnum", asname=None),
+                    ast.alias(name="IntEnum", asname=None)
+                ],
                 level=0
             )
         ]
