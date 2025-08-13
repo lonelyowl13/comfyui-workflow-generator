@@ -231,16 +231,22 @@ class WorkflowGenerator:
         # Generate arguments for both required and optional inputs
         args = []
         arg_names = []
-        all_inputs = {}
+        defaults = []
+        required_inputs = {}
+        optional_inputs = {}
         
-        # Collect all inputs (required and optional)
-        for input_type in ["required", "optional"]:
-            if input_type in input_section:
-                for input_name, input_info in input_section[input_type].items():
-                    all_inputs[input_name] = input_info
+        # Collect required inputs
+        if "required" in input_section:
+            for input_name, input_info in input_section["required"].items():
+                required_inputs[input_name] = input_info
         
-        # Generate arguments
-        for input_name, input_info in all_inputs.items():
+        # Collect optional inputs
+        if "optional" in input_section:
+            for input_name, input_info in input_section["optional"].items():
+                optional_inputs[input_name] = input_info
+        
+        # Generate arguments for required inputs first
+        for input_name, input_info in required_inputs.items():
             comfy_input_type = input_info[0]
             normalized_type = self.get_normalized_type(comfy_input_type)
             
@@ -254,6 +260,31 @@ class WorkflowGenerator:
                 annotation=ast.Name(id=normalized_type, ctx=ast.Load())
             )
             args.append(arg)
+        
+        # Generate arguments for optional inputs
+        for input_name, input_info in optional_inputs.items():
+            comfy_input_type = input_info[0]
+            normalized_type = self.get_normalized_type(comfy_input_type)
+            
+            # Clean argument name
+            clean_arg_name = self.normalize_name(input_name)
+            arg_names.append(clean_arg_name)
+            
+            # Create argument with Union type hint (Type | None)
+            union_type = ast.BinOp(
+                left=ast.Name(id=normalized_type, ctx=ast.Load()),
+                op=ast.BitOr(),
+                right=ast.Name(id="None", ctx=ast.Load())
+            )
+            
+            arg = ast.arg(
+                arg=clean_arg_name,
+                annotation=union_type
+            )
+            args.append(arg)
+            
+            # Add None as default value
+            defaults.append(ast.Constant(value=None))
         
         # Generate method body
         body = []
@@ -269,7 +300,70 @@ class WorkflowGenerator:
         )
         body.append(uuid_call)
         
-        # Generate node dictionary
+        # Generate node dictionary with conditional inputs
+        # Start with required inputs
+        inputs_dict_items = []
+        
+        # Add required inputs
+        for input_name in required_inputs.keys():
+            inputs_dict_items.append((
+                ast.Constant(value=input_name),
+                ast.Call(
+                    func=ast.Name(id="to_comfy_input", ctx=ast.Load()),
+                    args=[ast.Name(id=self.normalize_name(input_name), ctx=ast.Load())],
+                    keywords=[]
+                )
+            ))
+        
+        # Create the initial inputs dictionary with required inputs
+        inputs_dict = ast.Dict(
+            keys=[item[0] for item in inputs_dict_items],
+            values=[item[1] for item in inputs_dict_items]
+        )
+        
+        # Assign inputs_dict to a variable
+        inputs_dict_assign = ast.Assign(
+            targets=[ast.Name(id="inputs_dict", ctx=ast.Store())],
+            value=inputs_dict
+        )
+        body.append(inputs_dict_assign)
+        
+        # Add optional inputs conditionally
+        for input_name in optional_inputs.keys():
+            clean_arg_name = self.normalize_name(input_name)
+            
+            # Create conditional assignment: add to inputs dict only if not None
+            conditional_assignment = ast.If(
+                test=ast.Compare(
+                    left=ast.Name(id=clean_arg_name, ctx=ast.Load()),
+                    ops=[ast.IsNot()],
+                    comparators=[ast.Constant(value=None)]
+                ),
+                body=[
+                    ast.Expr(
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id="inputs_dict", ctx=ast.Load()),
+                                attr="__setitem__",
+                                ctx=ast.Load()
+                            ),
+                            args=[
+                                ast.Constant(value=input_name),
+                                ast.Call(
+                                    func=ast.Name(id="to_comfy_input", ctx=ast.Load()),
+                                    args=[ast.Name(id=clean_arg_name, ctx=ast.Load())],
+                                    keywords=[]
+                                )
+                            ],
+                            keywords=[]
+                        )
+                    )
+                ],
+                orelse=[]
+            )
+            body.append(conditional_assignment)
+        
+        # Create the final node dictionary
         node_dict = ast.Assign(
             targets=[ast.Name(id="comfy_json_node", ctx=ast.Store())],
             value=ast.Dict(
@@ -278,16 +372,7 @@ class WorkflowGenerator:
                     ast.Constant(value="class_type")
                 ],
                 values=[
-                    ast.Dict(
-                        keys=[ast.Constant(value=name) for name in all_inputs.keys()],
-                        values=[
-                            ast.Call(
-                                func=ast.Name(id="to_comfy_input", ctx=ast.Load()),
-                                args=[ast.Name(id=self.normalize_name(name), ctx=ast.Load())],
-                                keywords=[]
-                            ) for name in all_inputs.keys()
-                        ]
-                    ),
+                    ast.Name(id="inputs_dict", ctx=ast.Load()),
                     ast.Constant(value=node_name)
                 ]
             )
@@ -362,6 +447,7 @@ class WorkflowGenerator:
         
         # Add allowed values for enum inputs
         enum_inputs = []
+        all_inputs = {**required_inputs, **optional_inputs}
         for input_name, input_info in all_inputs.items():
             comfy_input_type = input_info[0]
 
@@ -405,7 +491,7 @@ class WorkflowGenerator:
                 args=[ast.arg(arg="self")] + args,
                 kwonlyargs=[],
                 kw_defaults=[],
-                defaults=[],
+                defaults=defaults,
                 kwarg=None,
                 vararg=None,
                 arg_defaults=[]
