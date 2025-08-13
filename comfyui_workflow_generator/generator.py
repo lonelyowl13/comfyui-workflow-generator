@@ -454,7 +454,9 @@ class WorkflowGenerator:
             # this is a list of allowed values, e.g. downloaded checkpoints, samplers, loras, etc 
             # adding this to the docstring as a context 
             if isinstance(comfy_input_type, list) and comfy_input_type:
-                options_string = f"{', \n'.join(map(str, comfy_input_type))}"
+                # Use join with newline separator to avoid f-string backslash issue in Python 3.10
+                options_list = [str(item) for item in comfy_input_type]
+                options_string = ',\n'.join(options_list)
 
                 # indent for readability
                 options_string = indent(options_string, "    ")
