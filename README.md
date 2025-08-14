@@ -20,7 +20,7 @@ pip install comfyui-workflow-generator
 comfyui-generate object_info.json -o my_workflow_api.py
 
 # Generate from ComfyUI server (auto-detected)
-comfyui-generate http://127.0.0.1:8188 -o workflow_api.py
+comfyui-generate http://127.0.0.1:8188/object_info -o workflow_api.py
 
 # Generate with default output name
 comfyui-generate object_info.json
