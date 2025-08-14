@@ -6,6 +6,7 @@ Generates Python code from ComfyUI object_info.json using AST manipulation.
 
 import json
 import ast
+import unicodedata
 from textwrap import indent
 import textwrap
 import uuid
@@ -13,6 +14,127 @@ import astor
 import re
 from typing import Dict, Any, List
 
+
+
+def replace_special_chars(s: str, sep: str = "_") -> str:
+    """
+    Replace characters that aren't valid in Python identifiers with readable names.
+    - Letters, digits, and underscore are kept.
+    - Common ASCII punctuation & whitespace are mapped to friendly names.
+    - Any other non-identifier char falls back to its Unicode name (lowercased, underscored),
+      or to a hex code like 'u00a0' if unnamed.
+    - Output is normalized to a valid Python identifier (only [A-Za-z0-9_], not starting with a digit).
+
+    Example:
+        'x + y*(z-1)' -> 'x_plus_y_asterisk_lparen_z_minus_1_rparen'
+    """
+    mapping = {
+        # whitespace
+        " ": "space", "\t": "tab", "\n": "newline", "\r": "carriage_return",
+        # quotes & backticks
+        '"': "double_quote", "'": "single_quote", "`": "backtick",
+        # brackets/braces/parens
+        "(": "lparen", ")": "rparen",
+        "[": "lbracket", "]": "rbracket",
+        "{": "lbrace",   "}": "rbrace",
+        # operators & punctuation
+        "!": "exclamation", "@": "at", "#": "hash", "$": "dollar", "%": "percent",
+        "^": "caret", "&": "ampersand", "*": "asterisk",
+        "-": "minus", "+": "plus", "=": "equals",
+        "/": "slash", "\\": "backslash",
+        ":": "colon", ";": "semicolon", ",": "comma", ".": "dot",
+        "<": "lt", ">": "gt", "?": "question",
+        "|": "pipe", "~": "tilde",
+        # underscore is already identifier-safe; keep as-is by not mapping it
+    }
+
+    out = []
+    for ch in s:
+        if ch == "_" or ch.isalnum():
+            out.append(ch)
+        else:
+            # Use explicit map first, then Unicode name fallback
+            name = mapping.get(ch)
+            if not name:
+                uname = unicodedata.name(ch, "")
+                if uname:
+                    name = uname.lower().replace(" ", "_").replace("-", "_")
+                else:
+                    name = f"u{ord(ch):04x}"  # unnamed -> hex code
+            # Surround with separators so neighbors don't merge awkwardly
+            out.append(sep + name + sep)
+
+    result = "".join(out)
+
+    # Collapse multiple separators and trim from ends
+    if sep:
+        result = re.sub(rf"{re.escape(sep)}+", sep, result).strip(sep)
+
+    # Final hardening: restrict to [A-Za-z0-9_] only (in case Unicode names add other chars)
+    result = re.sub(r"[^0-9A-Za-z_]", "_", result)
+
+    # Identifiers can't start with a digit
+    if result and result[0].isdigit():
+        result = "_" + result
+
+    return result
+
+
+def normalize_name(name: str) -> str:
+        """
+        Convert a name to a valid Python identifier.
+
+        Args:
+            name: Original name from object_info
+
+        Returns:
+            Valid Python identifier
+        """
+
+        # if name is not a valid identifier, return random gibberish
+        # this is a fallback variant and should not occur normally, but that's comfyui so everything is possible
+        invalid_identifier = "invalid_identifier_" + str(uuid.uuid4())
+
+        # name is empty or none
+        if not name:
+            return invalid_identifier
+
+        # Check if the name is already a valid Python identifier
+        if name.isidentifier():
+            normalized = name
+        else:
+            # Due to the fact that comfyui node names may contain arbitrary Unicode characters,
+            # and they are actively used by node creators, we can't simply strip them away with regexp,
+            # because it will create duplicate identifiers. For example, "+ve", "-ve"
+            normalized = replace_special_chars(name, "_")
+
+            # Remove consecutive underscores
+            normalized = re.sub(r'_+', '_', normalized)
+
+            # Remove leading/trailing underscores
+            normalized = normalized.strip('_')
+
+            # Remove leading digits (Python identifiers can't start with digits)
+            if normalized and normalized[0].isdigit():
+                normalized = '_' + normalized
+
+            # If we ended up with nothing valid, use a fallback
+            if not normalized:
+                normalized = invalid_identifier
+
+        # Ensure it's not a Python keyword
+        python_keywords = {
+            'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+            'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+            'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+            'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
+            'try', 'while', 'with', 'yield'
+        }
+
+        if normalized in python_keywords:
+            normalized = normalized + '_'
+
+        return normalized
 
 class WorkflowGenerator:
     """
@@ -33,62 +155,6 @@ class WorkflowGenerator:
             "STRING": "str",
             "BOOLEAN": "bool",
         }
-    
-    def normalize_name(self, name: str) -> str:
-        """
-        Convert a name to a valid Python identifier.
-        
-        Args:
-            name: Original name from object_info
-            
-        Returns:
-            Valid Python identifier
-        """
-
-        # if name is not a valid identifier, return random gibberish
-        # this is a fallback variant and should not occur normaly, but that's comfyui so everything is possible
-        invalid_identifier = "invalid_identifier_" + str(uuid.uuid4())
-
-        # name is empty or none
-        if not name:
-            return invalid_identifier
-        
-        # Check if the name is already a valid Python identifier
-        if name.isidentifier():
-                normalized = name
-        else:
-            # If not a valid identifier, we need to fix it
-            # Replace invalid characters with underscores
-            # Keep letters, digits, and underscores
-            normalized = re.sub(r'[^\w]', '_', name)
-            
-            # Remove leading digits (Python identifiers can't start with digits)
-            if normalized and normalized[0].isdigit():
-                normalized = '_' + normalized
-            
-            # Remove consecutive underscores
-            normalized = re.sub(r'_+', '_', normalized)
-            
-            # Remove leading/trailing underscores
-            normalized = normalized.strip('_')
-            
-            # If we ended up with nothing valid, use a fallback
-            if not normalized:
-                normalized = invalid_identifier
-        
-        # Ensure it's not a Python keyword
-        python_keywords = {
-            'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
-            'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
-            'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
-            'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
-            'try', 'while', 'with', 'yield'
-        }
-        
-        if normalized in python_keywords:
-            normalized = normalized + '_'
-        
-        return normalized
     
     def get_normalized_type(self, comfy_type: Any) -> str:
         """Convert ComfyUI type to Python type."""
@@ -111,7 +177,7 @@ class WorkflowGenerator:
         type_ = self.primitives.get(comfy_type)
         if not type_:
             # Custom ComfyUI type - normalize it like a node name
-            return self.normalize_name(comfy_type)
+            return normalize_name(comfy_type)
         return type_
     
     def get_return_type(self, outputs: List[str]) -> ast.expr:
@@ -194,7 +260,7 @@ class WorkflowGenerator:
     def generate_node_method(self, node_name: str, node_info: Dict[str, Any]) -> ast.FunctionDef:
         """Generate a method for a single node."""
         # Convert node name to valid Python method name
-        method_name = self.normalize_name(node_name)
+        method_name = normalize_name(node_name)
         
         # Get input section
         input_section = node_info.get("input", {})
@@ -251,7 +317,7 @@ class WorkflowGenerator:
             normalized_type = self.get_normalized_type(comfy_input_type)
             
             # Clean argument name
-            clean_arg_name = self.normalize_name(input_name)
+            clean_arg_name = normalize_name(input_name)
             arg_names.append(clean_arg_name)
             
             # Create argument
@@ -266,8 +332,8 @@ class WorkflowGenerator:
             comfy_input_type = input_info[0]
             normalized_type = self.get_normalized_type(comfy_input_type)
             
-            # Clean argument name
-            clean_arg_name = self.normalize_name(input_name)
+            # Clean argument name and add _opt suffix to distinguish from required inputs
+            clean_arg_name = normalize_name(input_name) + "_opt"
             arg_names.append(clean_arg_name)
             
             # Create argument with Union type hint (Type | None)
@@ -310,7 +376,7 @@ class WorkflowGenerator:
                 ast.Constant(value=input_name),
                 ast.Call(
                     func=ast.Name(id="to_comfy_input", ctx=ast.Load()),
-                    args=[ast.Name(id=self.normalize_name(input_name), ctx=ast.Load())],
+                    args=[ast.Name(id=normalize_name(input_name), ctx=ast.Load())],
                     keywords=[]
                 )
             ))
@@ -330,7 +396,7 @@ class WorkflowGenerator:
         
         # Add optional inputs conditionally
         for input_name in optional_inputs.keys():
-            clean_arg_name = self.normalize_name(input_name)
+            clean_arg_name = normalize_name(input_name) + "_opt"
             
             # Create conditional assignment: add to inputs dict only if not None
             conditional_assignment = ast.If(

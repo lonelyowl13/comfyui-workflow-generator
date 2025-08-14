@@ -81,20 +81,20 @@ class TestWorkflowGenerator:
     
     def test_normalize_name(self, sample_object_info):
         """Test name normalization."""
-        generator = WorkflowGenerator(sample_object_info)
+        from comfyui_workflow_generator.generator import normalize_name
         
         # Test basic normalization
-        assert generator.normalize_name("CheckpointLoaderSimple") == "CheckpointLoaderSimple"
-        assert generator.normalize_name("CLIP Text Encode") == "CLIP_Text_Encode"
-        assert generator.normalize_name("KSampler Advanced") == "KSampler_Advanced"
+        assert normalize_name("CheckpointLoaderSimple") == "CheckpointLoaderSimple"
+        assert normalize_name("CLIP Text Encode") == "CLIP_space_Text_space_Encode"
+        assert normalize_name("KSampler Advanced") == "KSampler_space_Advanced"
         
         # Test special characters
-        assert generator.normalize_name("Node@#$%😭😭😭") == "Node"
-        assert generator.normalize_name("123Node") == "123Node"  # Python 3 allows this
+        assert normalize_name("Node@#$%😭😭😭") == "Node_at_hash_dollar_percent_loudly_crying_face_loudly_crying_face_loudly_crying_face"
+        assert normalize_name("123Node") == "_123Node"  # Python identifiers can't start with digits
         
         # Test Python keywords
-        assert generator.normalize_name("class") == "class_"
-        assert generator.normalize_name("def") == "def_"
+        assert normalize_name("class") == "class_"
+        assert normalize_name("def") == "def_"
     
     def test_get_normalized_type(self, sample_object_info):
         """Test type normalization."""
@@ -112,7 +112,7 @@ class TestWorkflowGenerator:
         assert generator.get_normalized_type("VAE") == "VAE"
 
         # comfyui isn't super strict about node names and return types, yeah
-        assert generator.get_normalized_type("a, bunch, of, random, stupid, shit") == "a_bunch_of_random_stupid_shit"
+        assert generator.get_normalized_type("a, bunch, of, random, stupid, shit") == "a_comma_space_bunch_comma_space_of_comma_space_random_comma_space_stupid_comma_space_shit"
         
         # Test wildcard type
         assert generator.get_normalized_type("*") == "AnyNodeOutput"
@@ -193,7 +193,7 @@ class TestWorkflowGenerator:
         # Should have all required and optional inputs
         expected_args = ["self", "seed", "steps", "cfg", "sampler_name", "scheduler", 
                         "denoise", "model", "positive", "negative", "latent_image",
-                        "add_noise", "return_with_leftover_noise"]
+                        "add_noise_opt", "return_with_leftover_noise_opt"]
         actual_args = [arg.arg for arg in ksampler_method.args.args]
         assert actual_args == expected_args
     
